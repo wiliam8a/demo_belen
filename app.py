@@ -702,6 +702,108 @@ elif rol_seleccionado == "Trabajo Social":
                         st.rerun()
 
 
+elif rol_seleccionado == "Enfermería":
+    st.header("Módulo de Enfermería")
+    df = cargar_datos()
+    
+    # Filtrar solo activos para atención
+    if 'fecha_salida' not in df.columns: df['fecha_salida'] = ''
+    df_activos = df[df['fecha_salida'].isna() | (df['fecha_salida'] == '')]
+    
+    if df_activos.empty:
+        st.info("No hay personas activas registradas para atención médica.")
+        folio_buscar = None
+    else:
+        # Buscador de personas (Solo Activos)
+        folio_buscar = st.selectbox("Seleccione paciente (Solo Activos)", df_activos['folio'].tolist(), key="enf_k_selector")
+        
+        # Mostrar datos de la persona
+        if folio_buscar:
+            persona = df[df['folio'] == folio_buscar].iloc[0]
+            
+            # Key único para edición en enfermería
+            key_edit = f"enf_edit_mode_{folio_buscar}"
+            if key_edit not in st.session_state:
+                st.session_state[key_edit] = False
+            
+            is_editing = st.session_state[key_edit]
+            disabled_inputs = not is_editing
+            
+            st.subheader("Datos del Paciente")
+            
+            c1, c2 = st.columns(2)
+            
+            # --- CAMPOS (Replicados de Trabajo Social) ---
+            val_nombre = c1.text_input("Nombre Completo", value=persona['nombre'], disabled=disabled_inputs, key=f"enf_p_nom_{folio_buscar}")
+            
+            val_edad_int = int(persona['edad']) if pd.notnull(persona['edad']) else 0
+            val_edad = c2.number_input("Edad", value=val_edad_int, step=1, disabled=disabled_inputs, key=f"enf_p_edad_{folio_buscar}")
+            
+            val_nac = c1.text_input("Nacionalidad", value=persona['nacionalidad'], disabled=disabled_inputs, key=f"enf_p_nac_{folio_buscar}")
+            val_gen = c2.text_input("Género", value=persona.get('genero', ''), disabled=disabled_inputs, key=f"enf_p_gen_{folio_buscar}")
+            val_id = c1.text_input("Identificación / ID", value=persona.get('identificacion', ''), disabled=disabled_inputs, key=f"enf_p_id_{folio_buscar}")
+            
+            # Acompañantes / Tutor Logic
+            tipo_p = persona.get('tipo', 'Titular')
+            val_acompanantes = persona.get('num_acompanantes', 0)
+            
+            if tipo_p == 'Titular':
+                val_acompanantes = c2.number_input("Número de Acompañantes", value=int(val_acompanantes) if pd.notnull(val_acompanantes) else 0, step=1, disabled=disabled_inputs, key=f"enf_p_anum_{folio_buscar}")
+            else:
+                tutor_folio = persona.get('tutor_folio', 'N/A')
+                tutor_clean = normalize_id(tutor_folio)
+                c2.text_input("Folio del Titular/Tutor", value=tutor_clean, disabled=True, key=f"enf_p_tut_{folio_buscar}")
+            
+            # --- BOTONES DE ACCIÓN ---
+            st.write("") 
+            
+            if not is_editing:
+                if st.button("✏️ Editar Datos Personales", key=f"enf_btn_edit_{folio_buscar}"):
+                    st.session_state[key_edit] = True
+                    st.rerun()
+            else:
+                # Detectar cambios
+                cambio_nombre = val_nombre != persona['nombre']
+                cambio_edad = val_edad != val_edad_int
+                cambio_nac = val_nac != persona['nacionalidad']
+                cambio_gen = val_gen != persona.get('genero', '')
+                cambio_id = str(val_id) != str(persona.get('identificacion', ''))
+                
+                cambio_num_acomp = False
+                if tipo_p == 'Titular':
+                    old_num = int(persona.get('num_acompanantes', 0)) if pd.notnull(persona.get('num_acompanantes', 0)) else 0
+                    cambio_num_acomp = val_acompanantes != old_num
+                
+                hay_cambios = any([cambio_nombre, cambio_edad, cambio_nac, cambio_gen, cambio_id, cambio_num_acomp])
+                
+                col_b1, col_b2 = st.columns([1, 1])
+                with col_b1:
+                    if st.button("❌ Cancelar", key=f"enf_btn_cancel_{folio_buscar}"):
+                        st.session_state[key_edit] = False
+                        st.rerun()
+                with col_b2:
+                    if st.button("💾 Actualizar y Guardar", disabled=not hay_cambios, key=f"enf_btn_save_{folio_buscar}"):
+                         datos_update = {
+                            'folio': folio_buscar,
+                            'nombre': val_nombre,
+                            'edad': val_edad,
+                            'nacionalidad': val_nac,
+                            'genero': val_gen,
+                            'identificacion': val_id
+                        }
+                         if tipo_p == 'Titular':
+                             datos_update['num_acompanantes'] = val_acompanantes
+                             
+                         if actualizar_persona(datos_update):
+                             st.success("Actualizado correctamente.")
+                             st.session_state[key_edit] = False
+                             st.rerun()
+                         else:
+                             st.error("No se pudo actualizar.")
+            
+            st.markdown("---")
+            st.info("Módulo de Enfermería en construcción.")
+
 elif rol_seleccionado == "Admin":
     st.header("Dashboard General")
     df = cargar_datos()
@@ -782,13 +884,12 @@ elif rol_seleccionado == "Admin":
             # --- TABLA DIARIA ---
             st.write("#### 📅 Movimientos Diarios")
             
-            # Altas por día
-            df['ingreso_dt'] = pd.to_datetime(df['fecha_ingreso'], errors='coerce').dt.date
+            # Altas por día (Robustez: convertir a string y tomar primeros 10 caracteres YYYY-MM-DD)
+            df['ingreso_dt'] = pd.to_datetime(df['fecha_ingreso'].astype(str).str.strip().str[:10], errors='coerce').dt.date
             altas_dia = df['ingreso_dt'].value_counts().rename("Altas")
             
-            # Bajas por día (validar que fecha_salida contenga fechas válidas)
-            # fecha_salida puede tener hora, convertimos a date
-            df['salida_dt'] = pd.to_datetime(df['fecha_salida'], errors='coerce').dt.date
+            # Bajas por día
+            df['salida_dt'] = pd.to_datetime(df['fecha_salida'].astype(str).str.strip().str[:10], errors='coerce').dt.date
             bajas_dia = df['salida_dt'].value_counts().rename("Bajas")
             
             # Unir (Outer join para mostrar días donde solo hubo altas o solo bajas)
@@ -797,11 +898,11 @@ elif rol_seleccionado == "Admin":
             st.dataframe(mov_diario, use_container_width=True)
             
             # --- TABLA MENSUAL ---
-            st.write("####Movimientos Mensuales")
+            st.write("#### Movimientos Mensuales")
             
             # Extraer mes año (YYYY-MM)
-            altas_mes = pd.to_datetime(df['fecha_ingreso'], errors='coerce').dt.strftime('%Y-%m').value_counts().rename("Altas")
-            bajas_mes = pd.to_datetime(df['fecha_salida'], errors='coerce').dt.strftime('%Y-%m').value_counts().rename("Bajas")
+            altas_mes = pd.to_datetime(df['fecha_ingreso'].astype(str).str.strip().str[:10], errors='coerce').dt.strftime('%Y-%m').value_counts().rename("Altas")
+            bajas_mes = pd.to_datetime(df['fecha_salida'].astype(str).str.strip().str[:10], errors='coerce').dt.strftime('%Y-%m').value_counts().rename("Bajas")
             
             mov_mensual = pd.concat([altas_mes, bajas_mes], axis=1).fillna(0).astype(int).sort_index()
             st.dataframe(mov_mensual, use_container_width=True)
@@ -832,7 +933,7 @@ elif rol_seleccionado == "Admin":
                                 pdf_bytes = generar_pdf_reporte(mov_diario, mov_mensual)
                                 
                                 asunto = f"Reporte Albergue - {datetime.now().strftime('%Y-%m-%d')}"
-                                cuerpo = "Adjunto encontrarás el reporte detallado de Altas y Bajas (Diario y Mensual)."
+                                cuerpo = "Reporte detallado de Altas y Bajas (Diario y Mensual)."
                                 
                                 # Usar credenciales cargadas desde Secrets
                                 exito, mensaje = enviar_correo(
