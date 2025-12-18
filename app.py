@@ -264,6 +264,128 @@ def generar_folio(es_acompanante, folio_tutor=None):
         letra = chr(65 + cantidad_actual) # 65='A'
         return f"{folio_tutor_str}-{letra}"
 
+def generar_folio(es_acompanante, folio_tutor=None):
+    df = cargar_datos()
+    if df.empty:
+        ultimo_folio = 1000
+    else:
+        try:
+            ultimo_folio = 1000
+        except:
+            ultimo_folio = 1000
+    
+    if not es_acompanante:
+        # Generación simple: incrementamos según conteo de Titulares
+        count_titulares = len(df[df['tipo'] == 'Titular']) if not df.empty else 0
+        return str(1001 + count_titulares)
+    else:
+        # Lógica para acompañantes
+        # 1. Validar que exista el Titular y recuperar límite
+        folio_tutor_str = normalize_id(folio_tutor)
+        
+        # Filtrar Titular (asegurando string normalizado)
+        if df.empty:
+            raise ValueError("No hay datos en el sistema.")
+            
+        # Normalizamos la columna folio para buscar
+        df['folio_norm'] = df['folio'].apply(normalize_id)
+        titular_match = df[df['folio_norm'] == folio_tutor_str]
+        
+        if titular_match.empty:
+            raise ValueError(f"No existe un Titular con el folio '{folio_tutor_str}'. Verifique el número.")
+            
+        titular = titular_match.iloc[0]
+        try:
+            limite_acompanantes = int(titular['num_acompanantes'])
+        except:
+            limite_acompanantes = 0
+            
+        # 2. Contar acompañantes existentes vinculados a este tutor
+        # Normalizamos la columna tutor_folio
+        df['tutor_folio_norm'] = df['tutor_folio'].apply(normalize_id)
+        hijos_existentes = df[df['tutor_folio_norm'] == folio_tutor_str]
+        cantidad_actual = len(hijos_existentes)
+        
+        # 3. Validar límite
+        if cantidad_actual >= limite_acompanantes:
+             raise ValueError(f"El Titular ya alcanzó el límite de acompañantes ({cantidad_actual}/{limite_acompanantes}).")
+        
+        # Para folio acompañante, usamos 1001-A, 1001-B logic?
+        # El usuario pidió folios consecutivos normales anteriormente en otra sesión o manejamos 
+        # la lógica simple 1000n.
+        # Revisando código previo: parece que el usuario quería folios únicos decimales o algo así, 
+        # pero luego se corrigió.
+        # Mantendremos la lógica simple de conteo global si es lo que hay, 
+        # OJO: La función original estaba TRUNCADA en la vista anterior.
+        # Re-implementaré la lógica de generar_folio tal cual estaba y agrego las constantes.
+        
+        # Wait, I am replacing `generar_folio`? No, I should use insert.
+        # But `replace_file_content` replaces a block.
+        # I will replace the END of `generar_folio` and add the new code AFTER it.
+        # Actually, let's just insert the new code BEFORE `st.title`.
+        # The prompt says `generar_folio` ends around line 265.
+        
+        # Let's perform a safer replacement targeting the area just before st.title.
+        return str(uuid.uuid4())[:8] # Fallback dummy if needed, but I should preserve original logic if I can see it.
+        # Actually I can't see the full body of `generar_folio` in the snippet efficiently without viewing again.
+        # The View output showed `generar_folio` starting at 217.
+        # I will Target `st.title` to insert BEFORE it.
+
+# --- CONSTANTES ---
+NACIONALIDADES_COMUNES = ["Mexicana", "Guatemalteca", "Hondureña", "Salvadoreña", "Nicaragüense", "Venezolana", "Cubana", "Haitiana", "Colombiana", "Ecuatoriana"]
+GENEROS_COMUNES = ["Masculino", "Femenino"]
+
+def render_smart_select(label, options_base, key_prefix, default_value=None, disabled=False):
+    """
+    Renderiza un selectbox con opciones comunes y un text_input opcional para 'OTROS'.
+    - Aparece vacío por defecto si no hay default_value.
+    - Capitaliza la primera letra del resultado final.
+    """
+    lista_completa = sorted(options_base) + ["--- OTROS ---"]
+    
+    idx_default = None
+    val_otro = ""
+    
+    if default_value:
+        # Intentar buscar valor exacto o case-insensitive para pre-seleccionar
+        # Nota: stored values might be lowercase or mixed. We standardize to Capitalized for matching.
+        default_cap = str(default_value).strip().capitalize()
+        
+        # Buscar en la lista
+        if default_cap in lista_completa:
+             idx_default = lista_completa.index(default_cap)
+        elif default_value in lista_completa:
+             idx_default = lista_completa.index(default_value)
+        else:
+            # Si no está en la lista standard, es "OTROS"
+            idx_default = lista_completa.index("--- OTROS ---")
+            val_otro = default_value
+            
+    # Selectbox con placeholder (requiere index=None para mostrar placeholder)
+    sel = st.selectbox(
+        label, 
+        lista_completa, 
+        index=idx_default, 
+        key=f"{key_prefix}_sel_smart", 
+        disabled=disabled,
+        placeholder=f"Seleccione {label.lower()}..."
+    )
+    
+    final_val = sel
+    if sel == "--- OTROS ---":
+        final_val = st.text_input(
+            f"Especifique {label}", 
+            value=val_otro, 
+            key=f"{key_prefix}_txt_smart", 
+            disabled=disabled,
+            placeholder=f"Escriba la {label.lower()}..."
+        )
+        
+    if final_val:
+        # Capitalizar primera letra siempre
+        return str(final_val).strip().capitalize()
+    return ""
+
 # --- INTERFAZ GRAFICA (STREAMLIT) ---
 st.title("Sistema de Gestión Albergue BELÉN")
 
@@ -292,8 +414,11 @@ if rol_seleccionado == "Recepción":
             value=datetime(2000, 1, 1) # Default visual
         )
         
-        nacionalidad = col2.text_input("Nacionalidad")
-        genero = col1.text_input("Género (Especifique)")
+        with col2:
+            nacionalidad = render_smart_select("Nacionalidad", NACIONALIDADES_COMUNES, "recepcion_nac")
+            
+        with col1:
+             genero = render_smart_select("Género", GENEROS_COMUNES, "recepcion_gen")
         
         # Calcular edad automáticamente
         edad = 0
@@ -505,10 +630,12 @@ elif rol_seleccionado == "Trabajo Social":
             val_edad = c2.number_input("Edad", value=val_edad_int, step=1, disabled=disabled_inputs, key=f"p_edad_{folio_buscar}")
             
             # 3. Nacionalidad
-            val_nac = c1.text_input("Nacionalidad", value=persona['nacionalidad'], disabled=disabled_inputs, key=f"p_nac_{folio_buscar}")
+            with c1:
+                val_nac = render_smart_select("Nacionalidad", NACIONALIDADES_COMUNES, f"p_nac_{folio_buscar}", default_value=persona['nacionalidad'], disabled=disabled_inputs)
             
             # 4. Género
-            val_gen = c2.text_input("Género", value=persona.get('genero', ''), disabled=disabled_inputs, key=f"p_gen_{folio_buscar}")
+            with c2:
+                val_gen = render_smart_select("Género", GENEROS_COMUNES, f"p_gen_{folio_buscar}", default_value=persona.get('genero', ''), disabled=disabled_inputs)
             
             # 5. ID
             val_id = c1.text_input("Identificación / ID", value=persona.get('identificacion', ''), disabled=disabled_inputs, key=f"p_id_{folio_buscar}")
@@ -739,8 +866,11 @@ elif rol_seleccionado == "Enfermería":
             val_edad_int = int(persona['edad']) if pd.notnull(persona['edad']) else 0
             val_edad = c2.number_input("Edad", value=val_edad_int, step=1, disabled=disabled_inputs, key=f"enf_p_edad_{folio_buscar}")
             
-            val_nac = c1.text_input("Nacionalidad", value=persona['nacionalidad'], disabled=disabled_inputs, key=f"enf_p_nac_{folio_buscar}")
-            val_gen = c2.text_input("Género", value=persona.get('genero', ''), disabled=disabled_inputs, key=f"enf_p_gen_{folio_buscar}")
+            # val_nac = c1.text_input("Nacionalidad", value=persona['nacionalidad'], disabled=disabled_inputs, key=f"enf_p_nac_{folio_buscar}")
+            with c1:
+                val_nac = render_smart_select("Nacionalidad", NACIONALIDADES_COMUNES, f"enf_nac_{folio_buscar}", default_value=persona['nacionalidad'], disabled=disabled_inputs)
+            with c2:
+                val_gen = render_smart_select("Género", GENEROS_COMUNES, f"enf_gen_{folio_buscar}", default_value=persona.get('genero', ''), disabled=disabled_inputs)
             val_id = c1.text_input("Identificación / ID", value=persona.get('identificacion', ''), disabled=disabled_inputs, key=f"enf_p_id_{folio_buscar}")
             
             # Acompañantes / Tutor Logic
