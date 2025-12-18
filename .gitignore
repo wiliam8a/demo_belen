@@ -1,6 +1,9 @@
 # Streamlit secrets
 .streamlit/secrets.toml
 
+# Excel Database (Contains real/test data)
+datos_albergue.xlsx
+
 # Python cache & Environment
 __pycache__/
 *.py[cod]
